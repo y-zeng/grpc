@@ -1029,11 +1029,18 @@ libs:
   language: c++
   headers:
   - test/cpp/util/cli_call.h
+  - test/cpp/util/grpc_tool.h
   - test/cpp/util/proto_file_parser.h
+  - test/cpp/util/proto_reflection_descriptor_database.h
+  - test/cpp/util/service_describer.h
   src:
   - test/cpp/util/cli_call.cc
+  - test/cpp/util/grpc_tool.cc
   - test/cpp/util/proto_file_parser.cc
+  - test/cpp/util/proto_reflection_descriptor_database.cc
+  - test/cpp/util/service_describer.cc
   deps:
+  - grpc++_reflection
   - grpc++
   - grpc_plugin_support
 - name: grpc_plugin_support
@@ -2501,6 +2508,7 @@ targets:
   - test/cpp/util/cli_call_test.cc
   deps:
   - grpc_cli_libs
+  - grpc++_reflection
   - grpc++_test_util
   - grpc_test_util
   - grpc++
@@ -2669,6 +2677,7 @@ targets:
   - test/cpp/util/grpc_cli.cc
   deps:
   - grpc_cli_libs
+  - grpc++_reflection
   - grpc++_test_util
   - grpc_test_util
   - grpc++

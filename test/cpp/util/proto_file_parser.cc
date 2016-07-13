@@ -71,7 +71,7 @@ class ErrorPrinter
 
   void AddWarning(const grpc::string& filename, int line, int column,
                   const grpc::string& message) GRPC_OVERRIDE {
-    std::cout << "warning " << filename << " " << line << " " << column << " "
+    std::cerr << "warning " << filename << " " << line << " " << column << " "
               << message << std::endl;
   }
 
@@ -79,25 +79,74 @@ class ErrorPrinter
   ProtoFileParser* parser_;  // not owned
 };
 
-ProtoFileParser::ProtoFileParser(const grpc::string& proto_path,
-                                 const grpc::string& file_name,
-                                 const grpc::string& method)
+ProtoFileParser::ProtoFileParser(std::shared_ptr<grpc::Channel> channel,
+                                 const grpc::string& proto_path,
+                                 const grpc::string& protofiles)
     : has_error_(false) {
-  source_tree_.MapPath("", proto_path);
-  error_printer_.reset(new ErrorPrinter(this));
-  importer_.reset(new google::protobuf::compiler::Importer(
-      &source_tree_, error_printer_.get()));
-  const auto* file_desc = importer_->Import(file_name);
-  if (!file_desc) {
-    LogError("");
+  std::vector<std::string> service_list;
+  if (channel) {
+    reflection_db_.reset(new grpc::ProtoReflectionDescriptorDatabase(channel));
+    reflection_db_->GetServices(&service_list);
+  }
+
+  if (!protofiles.empty()) {
+    source_tree_.MapPath("", proto_path);
+    error_printer_.reset(new ErrorPrinter(this));
+    importer_.reset(new google::protobuf::compiler::Importer(
+        &source_tree_, error_printer_.get()));
+
+    grpc::string file_name;
+    std::stringstream ss(protofiles);
+    while (std::getline(ss, file_name, ',')) {
+      std::cerr << file_name << std::endl;
+      const auto* file_desc = importer_->Import(file_name);
+      if (file_desc) {
+        for (int i = 0; i < file_desc->service_count(); i++) {
+          service_desc_list_.push_back(file_desc->service(i));
+        }
+      } else {
+        std::cerr << file_name << " not found" << std::endl;
+      }
+    }
+
+    file_db_.reset(
+        new google::protobuf::DescriptorPoolDatabase(*importer_->pool()));
+  }
+
+  if (!reflection_db_ && !file_db_) {
+    LogError("No available proto database");
     return;
   }
-  dynamic_factory_.reset(
-      new google::protobuf::DynamicMessageFactory(importer_->pool()));
 
+  if (!reflection_db_) {
+    desc_db_ = std::move(file_db_);
+  } else if (!file_db_) {
+    desc_db_ = std::move(reflection_db_);
+  } else {
+    desc_db_.reset(new google::protobuf::MergedDescriptorDatabase(
+        reflection_db_.get(), file_db_.get()));
+  }
+
+  desc_pool_.reset(new google::protobuf::DescriptorPool(desc_db_.get()));
+  dynamic_factory_.reset(
+      new google::protobuf::DynamicMessageFactory(desc_pool_.get()));
+
+  for (auto it = service_list.begin(); it != service_list.end(); it++) {
+    if (const google::protobuf::ServiceDescriptor* service_desc =
+            desc_pool_->FindServiceByName(*it)) {
+      service_desc_list_.push_back(service_desc);
+    }
+  }
+}
+
+ProtoFileParser::~ProtoFileParser() {}
+
+grpc::string ProtoFileParser::GetFullMethodName(const grpc::string& method) {
+  has_error_ = false;
   const google::protobuf::MethodDescriptor* method_descriptor = nullptr;
-  for (int i = 0; !method_descriptor && i < file_desc->service_count(); i++) {
-    const auto* service_desc = file_desc->service(i);
+  for (auto it = service_desc_list_.begin(); it != service_desc_list_.end();
+       it++) {
+    const auto* service_desc = *it;
     for (int j = 0; j < service_desc->method_count(); j++) {
       const auto* method_desc = service_desc->method(j);
       if (MethodNameMatch(method_desc->full_name(), method)) {
@@ -115,35 +164,87 @@ ProtoFileParser::ProtoFileParser(const grpc::string& proto_path,
     LogError("Method name not found");
   }
   if (has_error_) {
-    return;
+    return "";
   }
-  full_method_name_ = method_descriptor->full_name();
-  size_t last_dot = full_method_name_.find_last_of('.');
-  if (last_dot != grpc::string::npos) {
-    full_method_name_[last_dot] = '/';
-  }
-  full_method_name_.insert(full_method_name_.begin(), '/');
 
-  request_prototype_.reset(
-      dynamic_factory_->GetPrototype(method_descriptor->input_type())->New());
-  response_prototype_.reset(
-      dynamic_factory_->GetPrototype(method_descriptor->output_type())->New());
+  return method_descriptor->full_name();
 }
 
-ProtoFileParser::~ProtoFileParser() {}
+grpc::string ProtoFileParser::GetFormatedMethodName(
+    const grpc::string& method) {
+  has_error_ = false;
+  grpc::string formated_method_name = GetFullMethodName(method);
+  if (has_error_) {
+    return "";
+  }
+  size_t last_dot = formated_method_name.find_last_of('.');
+  if (last_dot != grpc::string::npos) {
+    formated_method_name[last_dot] = '/';
+  }
+  formated_method_name.insert(formated_method_name.begin(), '/');
+  return formated_method_name;
+}
 
-grpc::string ProtoFileParser::GetSerializedProto(
-    const grpc::string& text_format_proto, bool is_request) {
+grpc::string ProtoFileParser::GetMessageTypeFromMethod(
+    const grpc::string& method, bool is_request) {
+  has_error_ = false;
+  grpc::string full_method_name = GetFullMethodName(method);
+  if (has_error_) {
+    return "";
+  }
+  const google::protobuf::MethodDescriptor* method_desc =
+      desc_pool_->FindMethodByName(full_method_name);
+  if (!method_desc) {
+    LogError("Method not found");
+    return "";
+  }
+
+  return is_request ? method_desc->input_type()->full_name()
+                    : method_desc->output_type()->full_name();
+}
+
+grpc::string ProtoFileParser::GetSerializedProtoFromMethod(
+    const grpc::string& method, const grpc::string& text_format_proto,
+    bool is_request) {
+  has_error_ = false;
+  grpc::string message_type_name = GetMessageTypeFromMethod(method, is_request);
+  if (has_error_) {
+    return "";
+  }
+  return GetSerializedProtoFromMessageType(message_type_name,
+                                           text_format_proto);
+}
+
+grpc::string ProtoFileParser::GetTextFormatFromMethod(
+    const grpc::string& method, const grpc::string& serialized_proto,
+    bool is_request) {
+  has_error_ = false;
+  grpc::string message_type_name = GetMessageTypeFromMethod(method, is_request);
+  if (has_error_) {
+    return "";
+  }
+  return GetTextFormatFromMessageType(message_type_name, serialized_proto);
+}
+
+grpc::string ProtoFileParser::GetSerializedProtoFromMessageType(
+    const grpc::string& message_type_name,
+    const grpc::string& text_format_proto) {
+  has_error_ = false;
   grpc::string serialized;
-  grpc::protobuf::Message* msg =
-      is_request ? request_prototype_.get() : response_prototype_.get();
+  const google::protobuf::Descriptor* desc =
+      desc_pool_->FindMessageTypeByName(message_type_name);
+  if (!desc) {
+    LogError("Message type not found");
+    return "";
+  }
+  grpc::protobuf::Message* msg = dynamic_factory_->GetPrototype(desc)->New();
   bool ok =
       google::protobuf::TextFormat::ParseFromString(text_format_proto, msg);
   if (!ok) {
     LogError("Failed to parse text format to proto.");
     return "";
   }
-  ok = request_prototype_->SerializeToString(&serialized);
+  ok = msg->SerializeToString(&serialized);
   if (!ok) {
     LogError("Failed to serialize proto.");
     return "";
@@ -151,10 +252,17 @@ grpc::string ProtoFileParser::GetSerializedProto(
   return serialized;
 }
 
-grpc::string ProtoFileParser::GetTextFormat(
-    const grpc::string& serialized_proto, bool is_request) {
-  grpc::protobuf::Message* msg =
-      is_request ? request_prototype_.get() : response_prototype_.get();
+grpc::string ProtoFileParser::GetTextFormatFromMessageType(
+    const grpc::string& message_type_name,
+    const grpc::string& serialized_proto) {
+  has_error_ = false;
+  const google::protobuf::Descriptor* desc =
+      desc_pool_->FindMessageTypeByName(message_type_name);
+  if (!desc) {
+    LogError("Message type not found");
+    return "";
+  }
+  grpc::protobuf::Message* msg = dynamic_factory_->GetPrototype(desc)->New();
   if (!msg->ParseFromString(serialized_proto)) {
     LogError("Failed to deserialize proto.");
     return "";
@@ -169,7 +277,7 @@ grpc::string ProtoFileParser::GetTextFormat(
 
 void ProtoFileParser::LogError(const grpc::string& error_msg) {
   if (!error_msg.empty()) {
-    std::cout << error_msg << std::endl;
+    std::cerr << error_msg << std::endl;
   }
   has_error_ = true;
 }
