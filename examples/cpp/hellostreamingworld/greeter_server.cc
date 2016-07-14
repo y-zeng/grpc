@@ -37,30 +37,35 @@
 
 #include <grpc++/grpc++.h>
 
-#include "helloworld.grpc.pb.h"
+#include "hellostreamingworld.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
-using helloworld::HelloRequest;
-using helloworld::HelloReply;
-using helloworld::Greeter;
+using grpc::ServerWriter;
+using hellostreamingworld::HelloRequest;
+using hellostreamingworld::HelloReply;
+using hellostreamingworld::MultiGreeter;
 
 static std::unique_ptr<char> str;
 
 // Logic and data behind the server's behavior.
-class GreeterServiceImpl final : public Greeter::Service {
+class GreeterServiceImpl final : public MultiGreeter::Service {
   Status SayHello(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
-    reply->set_message(str.get());
+                  ServerWriter<HelloReply>* writer) override {
+    HelloReply reply;
+    reply.set_message(str.get());
+    for (int i = 0; i < request->num_greetings(); ++i) {
+      writer->Write(reply);
+    }
     return Status::OK;
   }
 };
 
 void RunServer() {
-  str.reset((char*)malloc(3 * 1024 * 1024 * sizeof(char)));
-  memset(str.get(), '-', 3 * 1024 * 1024);
+  str.reset((char*)malloc(2 * 1024 * 1024 * sizeof(char)));
+  memset(str.get(), '-', 2 * 1024 * 1024);
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
 

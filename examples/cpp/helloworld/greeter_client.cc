@@ -34,6 +34,8 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <ctime>
+#include <sstream>
 
 #include <grpc++/grpc++.h>
 
@@ -65,12 +67,17 @@ class GreeterClient {
     // the server and/or tweak certain RPC behaviors.
     ClientContext context;
 
+    clock_t begin = clock();
     // The actual RPC.
     Status status = stub_->SayHello(&context, request, &reply);
-
+    clock_t end = clock();
+    std::ostringstream ss;
+    ss << std::endl << "time: " << double(end - begin) / CLOCKS_PER_SEC << std::endl
+       << "Payload size: " << reply.message().size() << std::endl
+       << "bps: " << double(reply.message().size()) / (double(end - begin) / CLOCKS_PER_SEC);
     // Act upon its status.
     if (status.ok()) {
-      return reply.message();
+      return ss.str();
     } else {
       std::cout << status.error_code() << ": " << status.error_message()
                 << std::endl;
