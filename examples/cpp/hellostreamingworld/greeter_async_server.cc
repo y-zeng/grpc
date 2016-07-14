@@ -38,17 +38,20 @@
 
 #include <grpc++/grpc++.h>
 
-#include "helloworld.grpc.pb.h"
+#include "hellostreamingworld.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerAsyncResponseWriter;
+using grpc::ServerAsyncWriter;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::ServerCompletionQueue;
 using grpc::Status;
-using helloworld::HelloRequest;
-using helloworld::HelloReply;
-using helloworld::Greeter;
+using hellostreamingworld::HelloRequest;
+using hellostreamingworld::HelloReply;
+using hellostreamingworld::MultiGreeter;
+
+static std::unique_ptr<char> str;
 
 class ServerImpl final {
  public:
@@ -60,6 +63,8 @@ class ServerImpl final {
 
   // There is no shutdown handling in this code.
   void Run() {
+    str.reset((char*)malloc(2 * 1024 * 1024 * sizeof(char)));
+    memset(str.get(), '-', 2 * 1024 * 1024);
     std::string server_address("0.0.0.0:50051");
 
     ServerBuilder builder;
@@ -86,8 +91,8 @@ class ServerImpl final {
     // Take in the "service" instance (in this case representing an asynchronous
     // server) and the completion queue "cq" used for asynchronous communication
     // with the gRPC runtime.
-    CallData(Greeter::AsyncService* service, ServerCompletionQueue* cq)
-        : service_(service), cq_(cq), responder_(&ctx_), status_(CREATE) {
+    CallData(MultiGreeter::AsyncService* service, ServerCompletionQueue* cq)
+        : service_(service), cq_(cq), srv_stream_(&ctx_), status_(CREATE) {
       // Invoke the serving logic right away.
       Proceed();
     }
@@ -102,7 +107,10 @@ class ServerImpl final {
         // the tag uniquely identifying the request (so that different CallData
         // instances can serve different requests concurrently), in this case
         // the memory address of this CallData instance.
-        service_->RequestSayHello(&ctx_, &request_, &responder_, cq_, cq_,
+        // service_->RequestSayHello(&ctx_, &request_, &responder_, cq_, cq_,
+        //                           this);
+        num_responses_ = 0;
+        service_->RequestSayHello(&ctx_, &request_, &srv_stream_, cq_, cq_,
                                   this);
       } else if (status_ == PROCESS) {
         // Spawn a new CallData instance to serve new clients while we process
@@ -111,14 +119,18 @@ class ServerImpl final {
         new CallData(service_, cq_);
 
         // The actual processing.
-        std::string prefix("Hello ");
-        reply_.set_message(prefix + request_.name());
+        // std::string prefix("Hello ");
+        if (num_responses_++ == request_.num_greetings()) {
+          status_ = FINISH;
+          srv_stream_.Finish(Status::OK, this);
+        } else {
+          reply_.set_message(str.get());
+          srv_stream_.Write(reply_, this);
+        }
 
         // And we are done! Let the gRPC runtime know we've finished, using the
         // memory address of this instance as the uniquely identifying tag for
         // the event.
-        status_ = FINISH;
-        responder_.Finish(reply_, Status::OK, this);
       } else {
         GPR_ASSERT(status_ == FINISH);
         // Once in the FINISH state, deallocate ourselves (CallData).
@@ -129,7 +141,7 @@ class ServerImpl final {
    private:
     // The means of communication with the gRPC runtime for an asynchronous
     // server.
-    Greeter::AsyncService* service_;
+    MultiGreeter::AsyncService* service_;
     // The producer-consumer queue where for asynchronous server notifications.
     ServerCompletionQueue* cq_;
     // Context for the rpc, allowing to tweak aspects of it such as the use
@@ -143,11 +155,13 @@ class ServerImpl final {
     HelloReply reply_;
 
     // The means to get back to the client.
-    ServerAsyncResponseWriter<HelloReply> responder_;
+    // ServerAsyncResponseWriter<HelloReply> responder_;
+    ServerAsyncWriter<HelloReply> srv_stream_;
 
     // Let's implement a tiny state machine with the following states.
     enum CallStatus { CREATE, PROCESS, FINISH };
     CallStatus status_;  // The current serving state.
+    int num_responses_;
   };
 
   // This can be run in multiple threads if needed.
@@ -167,9 +181,8 @@ class ServerImpl final {
       static_cast<CallData*>(tag)->Proceed();
     }
   }
-
   std::unique_ptr<ServerCompletionQueue> cq_;
-  Greeter::AsyncService service_;
+  MultiGreeter::AsyncService service_;
   std::unique_ptr<Server> server_;
 };
 

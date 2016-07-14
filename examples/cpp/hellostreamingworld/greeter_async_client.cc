@@ -31,36 +31,41 @@
  *
  */
 
+#include <chrono>
+#include <ctime>
 #include <iostream>
 #include <memory>
-#include <string>
-#include <ctime>
 #include <sstream>
+#include <string>
 
 #include <grpc++/grpc++.h>
 
-#include "helloworld.grpc.pb.h"
+#include "hellostreamingworld.grpc.pb.h"
 
 using grpc::Channel;
 using grpc::ClientAsyncResponseReader;
+using grpc::ClientAsyncReader;
 using grpc::ClientContext;
 using grpc::CompletionQueue;
 using grpc::Status;
-using helloworld::HelloRequest;
-using helloworld::HelloReply;
-using helloworld::Greeter;
+using hellostreamingworld::HelloRequest;
+using hellostreamingworld::HelloReply;
+using hellostreamingworld::MultiGreeter;
+
+static void* tag(int i) { return (void*)(intptr_t)i; }
 
 class GreeterClient {
  public:
   explicit GreeterClient(std::shared_ptr<Channel> channel)
-      : stub_(Greeter::NewStub(channel)) {}
+      : stub_(MultiGreeter::NewStub(channel)) {}
 
   // Assembles the client's payload, sends it and presents the response back
   // from the server.
-  std::string SayHello(const std::string& user) {
+  std::string SayHello(const std::string& user, const int num_greetings) {
     // Data we are sending to the server.
     HelloRequest request;
     request.set_name(user);
+    request.set_num_greetings(num_greetings);
 
     // Container for the data we expect from the server.
     HelloReply reply;
@@ -75,20 +80,32 @@ class GreeterClient {
 
     // Storage for the status of the RPC upon completion.
     Status status;
+    void* got_tag;
+    bool ok = false;
 
-    clock_t begin = clock();
+    double received_data_size = 0;
+    auto begin = std::chrono::steady_clock::now();
     // stub_->AsyncSayHello() performs the RPC call, returning an instance we
     // store in "rpc". Because we are using the asynchronous API, we need to
     // hold on to the "rpc" instance in order to get updates on the ongoing RPC.
-    std::unique_ptr<ClientAsyncResponseReader<HelloReply> > rpc(
-        stub_->AsyncSayHello(&context, request, &cq));
+    std::unique_ptr<ClientAsyncReader<HelloReply> > cli_stream(
+        stub_->AsyncSayHello(&context, request, &cq, (void*)1));
+    GPR_ASSERT(cq.Next(&got_tag, &ok));
+    GPR_ASSERT(got_tag == tag(1));
+    GPR_ASSERT(ok);
 
+    while (ok) {
+      cli_stream->Read(&reply, tag(1));
+      GPR_ASSERT(cq.Next(&got_tag, &ok));
+      GPR_ASSERT(got_tag == tag(1));
+      if (ok) {
+        received_data_size += reply.message().size();
+      }
+    }
     // Request that, upon completion of the RPC, "reply" be updated with the
     // server's response; "status" with the indication of whether the operation
     // was successful. Tag the request with the integer 1.
-    rpc->Finish(&reply, &status, (void*)1);
-    void* got_tag;
-    bool ok = false;
+    cli_stream->Finish(&status, tag(1));
     // Block until the next result is available in the completion queue "cq".
     // The return value of Next should always be checked. This return value
     // tells us whether there is any kind of event or the cq_ is shutting down.
@@ -96,16 +113,20 @@ class GreeterClient {
 
     // Verify that the result from "cq" corresponds, by its tag, our previous
     // request.
-    GPR_ASSERT(got_tag == (void*)1);
+    GPR_ASSERT(got_tag == tag(1));
     // ... and that the request was completed successfully. Note that "ok"
     // corresponds solely to the request for updates introduced by Finish().
     GPR_ASSERT(ok);
 
-    clock_t end = clock();
+    auto end = std::chrono::steady_clock::now();
+    auto diff = end - begin;
+    auto time_elipsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
     std::ostringstream ss;
-    ss << std::endl << "time: " << double(end - begin) / CLOCKS_PER_SEC << std::endl
-       << "Payload size: " << reply.message().size() << std::endl
-       << "bps: " << double(reply.message().size()) / (double(end - begin) / CLOCKS_PER_SEC);
+    ss << std::endl
+       << "time: " << time_elipsed << " ms" << std::endl
+       << "Payload size: " << received_data_size * 8 << " bits" << std::endl
+       << "bps: " << received_data_size / time_elipsed / 1000 * 8 << " x 10^6";
 
     // Act upon the status of the actual RPC.
     if (status.ok()) {
@@ -118,7 +139,7 @@ class GreeterClient {
  private:
   // Out of the passed in Channel comes the stub, stored here, our view of the
   // server's exposed services.
-  std::unique_ptr<Greeter::Stub> stub_;
+  std::unique_ptr<MultiGreeter::Stub> stub_;
 };
 
 int main(int argc, char** argv) {
@@ -129,7 +150,7 @@ int main(int argc, char** argv) {
   GreeterClient greeter(grpc::CreateChannel(
       "localhost:50051", grpc::InsecureChannelCredentials()));
   std::string user("world");
-  std::string reply = greeter.SayHello(user);  // The actual RPC call!
+  std::string reply = greeter.SayHello(user, 5000);  // The actual RPC call!
   std::cout << "Greeter received: " << reply << std::endl;
 
   return 0;

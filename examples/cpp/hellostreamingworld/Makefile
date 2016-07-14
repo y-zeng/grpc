@@ -41,7 +41,7 @@ PROTOS_PATH = ../../protos
 
 vpath %.proto $(PROTOS_PATH)
 
-all: system-check greeter_server greeter_client
+all: system-check greeter_server greeter_client greeter_async_server greeter_async_client
 
 greeter_client: hellostreamingworld.pb.o hellostreamingworld.grpc.pb.o greeter_client.o
 	$(CXX) $^ $(LDFLAGS) -o $@
