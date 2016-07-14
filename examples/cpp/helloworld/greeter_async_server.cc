@@ -50,6 +50,8 @@ using helloworld::HelloRequest;
 using helloworld::HelloReply;
 using helloworld::Greeter;
 
+static std::unique_ptr<char> str;
+
 class ServerImpl final {
  public:
   ~ServerImpl() {
@@ -60,6 +62,8 @@ class ServerImpl final {
 
   // There is no shutdown handling in this code.
   void Run() {
+    str.reset((char*)malloc(2 * 1024 * 1024 * sizeof(char)));
+    memset(str.get(), '-', 2 * 1024 * 1024);
     std::string server_address("0.0.0.0:50051");
 
     ServerBuilder builder;
@@ -111,8 +115,7 @@ class ServerImpl final {
         new CallData(service_, cq_);
 
         // The actual processing.
-        std::string prefix("Hello ");
-        reply_.set_message(prefix + request_.name());
+        reply_.set_message(str.get());
 
         // And we are done! Let the gRPC runtime know we've finished, using the
         // memory address of this instance as the uniquely identifying tag for
