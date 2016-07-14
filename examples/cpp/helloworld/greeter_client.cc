@@ -55,7 +55,7 @@ class GreeterClient {
 
   // Assambles the client's payload, sends it and presents the response back
   // from the server.
-  std::string SayHello(const std::string& user) {
+  std::string SayHello(const std::string& user, const int num_greetings) {
     // Data we are sending to the server.
     HelloRequest request;
     request.set_name(user);
@@ -65,24 +65,28 @@ class GreeterClient {
 
     // Context for the client. It could be used to convey extra information to
     // the server and/or tweak certain RPC behaviors.
-    ClientContext context;
 
-    clock_t begin = clock();
+    double received_data_size = 0;
+    auto begin = std::chrono::steady_clock::now();
     // The actual RPC.
-    Status status = stub_->SayHello(&context, request, &reply);
-    clock_t end = clock();
-    std::ostringstream ss;
-    ss << std::endl << "time: " << double(end - begin) / CLOCKS_PER_SEC << std::endl
-       << "Payload size: " << reply.message().size() << std::endl
-       << "bps: " << double(reply.message().size()) / (double(end - begin) / CLOCKS_PER_SEC);
-    // Act upon its status.
-    if (status.ok()) {
-      return ss.str();
-    } else {
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl;
-      return "RPC failed";
+    for (int i = 0; i < num_greetings; i++) {
+      ClientContext context;
+      Status status = stub_->SayHello(&context, request, &reply);
+      received_data_size += reply.message().size();
+      GPR_ASSERT(status.ok());
     }
+    auto end = std::chrono::steady_clock::now();
+    auto diff = end - begin;
+    auto time_elipsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
+    std::ostringstream ss;
+    ss << std::endl
+       << "time: " << time_elipsed << " ms" << std::endl
+       << "Payload size: " << received_data_size * 8 << " bits" << std::endl
+       << "bps: " << received_data_size / time_elipsed / 1000 * 8 << " x 10^6";
+    // Act upon its status.
+
+    return ss.str();
   }
 
  private:
@@ -97,7 +101,7 @@ int main(int argc, char** argv) {
   GreeterClient greeter(grpc::CreateChannel(
       "localhost:50051", grpc::InsecureChannelCredentials()));
   std::string user("world");
-  std::string reply = greeter.SayHello(user);
+  std::string reply = greeter.SayHello(user, 1000);
   std::cout << "Greeter received: " << reply << std::endl;
 
   return 0;

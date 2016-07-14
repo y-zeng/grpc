@@ -59,8 +59,8 @@ class GreeterServiceImpl final : public Greeter::Service {
 };
 
 void RunServer() {
-  str.reset((char*)malloc(3 * 1024 * 1024 * sizeof(char)));
-  memset(str.get(), '-', 3 * 1024 * 1024);
+  str.reset((char*)malloc(2 * 1024 * 1024 * sizeof(char)));
+  memset(str.get(), '-', 2 * 1024 * 1024);
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
 
