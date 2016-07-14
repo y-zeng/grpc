@@ -36,6 +36,7 @@
 #include <string>
 #include <ctime>
 #include <sstream>
+#include <chrono>
 
 #include <grpc++/grpc++.h>
 
@@ -70,7 +71,7 @@ class GreeterClient {
     ClientContext context;
 
     double received_data_size = 0;
-    clock_t begin = clock();
+    auto begin = std::chrono::steady_clock::now();
     // The actual RPC.
     std::unique_ptr<ClientReader<HelloReply> > reader(
         stub_->SayHello(&context, request));
@@ -79,11 +80,13 @@ class GreeterClient {
     }
     Status status = reader->Finish();
 
-    clock_t end = clock();
+    auto end = std::chrono::steady_clock::now();
+    auto diff = end - begin;
+    auto time_elipsed = std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
     std::ostringstream ss;
-    ss << std::endl << "time: " << double(end - begin) / CLOCKS_PER_SEC << std::endl
-       << "Payload size: " << received_data_size << std::endl
-       << "bps: " << received_data_size / (double(end - begin) / CLOCKS_PER_SEC);
+    ss << std::endl << "time: " << time_elipsed << " ms"<< std::endl
+       << "Payload size: " << received_data_size * 8 << " bits" << std::endl
+       << "bps: " << received_data_size / time_elipsed / 1000 * 8 << " x 10^6";
     // Act upon its status.
     if (status.ok()) {
       return ss.str();
