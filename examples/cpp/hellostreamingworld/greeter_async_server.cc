@@ -116,7 +116,9 @@ class ServerImpl final {
         // Spawn a new CallData instance to serve new clients while we process
         // the one for this CallData. The instance will deallocate itself as
         // part of its FINISH state.
-        new CallData(service_, cq_);
+        if (num_responses_ == 0) {
+          new CallData(service_, cq_);
+        }
 
         // The actual processing.
         // std::string prefix("Hello ");
