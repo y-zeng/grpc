@@ -158,7 +158,7 @@ DEFINE_MACROS = (
     ('OPENSSL_NO_ASM', 1), ('_WIN32_WINNT', 0x600),
     ('GPR_BACKWARDS_COMPATIBILITY_MODE', 1),)
 if "win32" in sys.platform:
-  DEFINE_MACROS += (('WIN32_LEAN_AND_MEAN', 1), ('CARES_STATICLIB', 1),)
+  DEFINE_MACROS += (('WIN32_LEAN_AND_MEAN', 1), ('CARES_STATICLIB', 1), ('WIN32', 1))
   if '64bit' in platform.architecture()[0]:
     DEFINE_MACROS += (('MS_WIN64', 1),)
   elif sys.version_info >= (3, 5):
