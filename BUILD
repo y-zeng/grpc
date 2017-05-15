@@ -444,6 +444,7 @@ grpc_cc_library(
 
 grpc_cc_library(
     name = "grpc_trace",
+    language = "c",
     srcs = ["src/core/lib/debug/trace.c"],
     hdrs = ["src/core/lib/debug/trace.h"],
     deps = [":gpr"],
@@ -729,6 +730,7 @@ grpc_cc_library(
 
 grpc_cc_library(
     name = "grpc_common",
+    language = "c",
     deps = [
         "grpc_base",
         # standard plugins
