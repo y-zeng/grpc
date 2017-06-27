@@ -42,7 +42,6 @@ grpc_cc_library(
 
 grpc_cc_binary(
     name = "interop_server",
-    language = "c++",
     srcs = [
         "interop_server_bootstrap.cc",
     ],
@@ -137,9 +136,5 @@ grpc_cc_binary(
         "//:grpc++",
         "//test/cpp/util:metrics_server_lib",
         "//test/cpp/util:test_config",
-    name = "interop_client",
-    language = "c++",
-    deps = [
-        ":interop_client_main",
     ],
 )
