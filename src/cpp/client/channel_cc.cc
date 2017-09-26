@@ -101,7 +101,7 @@ class ChannelConnectivityWatcher : private GrpcLibraryCodegen {
 
   static bool IsDisabled() {
     char* env = gpr_getenv("GRPC_DISABLE_CHANNEL_CONNECTIVITY_WATCHER");
-    bool disabled = gpr_is_true(env);
+    bool disabled = true;
     gpr_free(env);
     return disabled;
   }

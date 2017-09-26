@@ -284,6 +284,10 @@ struct grpc_completion_queue {
 
   grpc_closure pollset_shutdown_done;
   int num_polls;
+
+  grpc_timer check_completion_queue_timer;
+  grpc_closure check_completion_queue_closure;
+  bool is_check_completion_queue_timer_set;
 };
 
 /* Forward declarations */
@@ -325,6 +329,8 @@ static void cq_init_next(void *data);
 static void cq_init_pluck(void *data);
 static void cq_destroy_next(void *data);
 static void cq_destroy_pluck(void *data);
+
+static void dump_pending_tags(grpc_completion_queue *cq);
 
 /* Completion queue vtables based on the completion-type */
 static const cq_vtable g_cq_vtable[] = {
@@ -393,6 +399,45 @@ static long cq_event_queue_num_items(grpc_cq_event_queue *q) {
   return (long)gpr_atm_no_barrier_load(&q->num_queue_items);
 }
 
+static void check_completion_queue(grpc_exec_ctx *exec_ctx, void *arg,
+                                   grpc_error *error) {
+  grpc_completion_queue *cq = (grpc_completion_queue *)arg;
+  gpr_log(GPR_ERROR, "check_completion_queue");
+  if (error == GRPC_ERROR_NONE) {
+    size_t timeout_num = 0;
+    gpr_timespec now = gpr_now(GPR_CLOCK_MONOTONIC);
+    while (timeout_num < 2) {
+      gpr_mu_lock(cq->mu);
+      cq->num_polls++;
+      grpc_error *err = cq->poller_vtable->work(
+          exec_ctx, POLLSET_FROM_CQ(cq), NULL, gpr_now(GPR_CLOCK_MONOTONIC),
+          gpr_inf_past(GPR_CLOCK_MONOTONIC));
+      gpr_mu_unlock(cq->mu);
+      if (err != GRPC_ERROR_NONE) {
+        const char *msg = grpc_error_string(err);
+        gpr_log(GPR_ERROR, "Completion queue next failed: %s", msg);
+        GRPC_ERROR_UNREF(err);
+        dump_pending_tags(cq);
+        ++timeout_num;
+      } else {
+        timeout_num = 0;
+      }
+    }
+    gpr_mu_lock(cq->mu);
+    if (cq->is_check_completion_queue_timer_set) {
+      cq->is_check_completion_queue_timer_set = true;
+      now = gpr_now(GPR_CLOCK_MONOTONIC);
+      grpc_timer_init(
+          exec_ctx, &cq->check_completion_queue_timer,
+          gpr_time_add(now, gpr_time_from_millis(500, GPR_TIMESPAN)),
+          &cq->check_completion_queue_closure, now);
+    }
+    gpr_mu_unlock(cq->mu);
+  } else {
+    GRPC_CQ_INTERNAL_UNREF(exec_ctx, cq, "check_completion_queue done");
+  }
+}
+
 grpc_completion_queue *grpc_completion_queue_create_internal(
     grpc_cq_completion_type completion_type,
     grpc_cq_polling_type polling_type) {
@@ -411,7 +456,6 @@ grpc_completion_queue *grpc_completion_queue_create_internal(
 
   grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
   GRPC_STATS_INC_CQS_CREATED(&exec_ctx);
-  grpc_exec_ctx_finish(&exec_ctx);
 
   cq = (grpc_completion_queue *)gpr_zalloc(sizeof(grpc_completion_queue) +
                                            vtable->data_size +
@@ -421,13 +465,24 @@ grpc_completion_queue *grpc_completion_queue_create_internal(
   cq->poller_vtable = poller_vtable;
 
   /* One for destroy(), one for pollset_shutdown */
-  gpr_ref_init(&cq->owning_refs, 2);
+  gpr_ref_init(&cq->owning_refs, 3);
 
   poller_vtable->init(POLLSET_FROM_CQ(cq), &cq->mu);
   vtable->init(DATA_FROM_CQ(cq));
 
   GRPC_CLOSURE_INIT(&cq->pollset_shutdown_done, on_pollset_shutdown_done, cq,
                     grpc_schedule_on_exec_ctx);
+  if (polling_type == GRPC_CQ_DEFAULT_POLLING) {
+    GRPC_CLOSURE_INIT(&cq->check_completion_queue_closure,
+                      check_completion_queue, cq, grpc_schedule_on_exec_ctx);
+    // GRPC_CQ_INTERNAL_REF(cq, "check_completion_queue");
+    gpr_timespec now = gpr_now(GPR_CLOCK_MONOTONIC);
+    cq->is_check_completion_queue_timer_set = true;
+    grpc_timer_init(&exec_ctx, &cq->check_completion_queue_timer,
+                    gpr_time_add(now, gpr_time_from_millis(500, GPR_TIMESPAN)),
+                    &cq->check_completion_queue_closure, now);
+  }
+  grpc_exec_ctx_finish(&exec_ctx);
 
   GPR_TIMER_END("grpc_completion_queue_create_internal", 0);
 
@@ -977,6 +1032,12 @@ static void cq_shutdown_next(grpc_exec_ctx *exec_ctx,
     return;
   }
   cqd->shutdown_called = true;
+  if (cq->is_check_completion_queue_timer_set) {
+    grpc_timer_cancel(exec_ctx, &cq->check_completion_queue_timer);
+  } else {
+    cq->is_check_completion_queue_timer_set = true;
+    GRPC_CQ_INTERNAL_UNREF(exec_ctx, cq, "cancel check_completion_queue");
+  }
   /* Doing a full_fetch_add (i.e acq/release) here to match with
    * cq_begin_op_for_next and and cq_end_op_for_next functions which read/write
    * on this counter without necessarily holding a lock on cq */
@@ -1211,6 +1272,12 @@ static void cq_shutdown_pluck(grpc_exec_ctx *exec_ctx,
     return;
   }
   cqd->shutdown_called = true;
+  if (cq->is_check_completion_queue_timer_set) {
+    grpc_timer_cancel(exec_ctx, &cq->check_completion_queue_timer);
+  } else {
+    cq->is_check_completion_queue_timer_set = true;
+    GRPC_CQ_INTERNAL_UNREF(exec_ctx, cq, "cancel check_completion_queue");
+  }
   if (gpr_atm_full_fetch_add(&cqd->pending_events, -1) == 1) {
     cq_finish_shutdown_pluck(exec_ctx, cq);
   }
