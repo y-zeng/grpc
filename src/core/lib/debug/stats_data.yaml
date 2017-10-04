@@ -270,3 +270,8 @@
 - counter: server_slowpath_requests_queued
   doc: How many times was the server slow path taken (indicates too few
        outstanding requests)
+# completion queue
+- counter: completion_queue_event_pop
+  doc: Number of all the completion queue event pops
+- counter: completion_queue_event_pop_acquired_lock
+  doc: Number of the completion queue event pops that acquired the queue lock

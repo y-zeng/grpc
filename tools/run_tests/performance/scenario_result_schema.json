@@ -552,6 +552,16 @@
       }, 
       {
         "mode": "NULLABLE", 
+        "name": "core_completion_queue_event_pop", 
+        "type": "INTEGER"
+      }, 
+      {
+        "mode": "NULLABLE", 
+        "name": "core_completion_queue_event_pop_acquired_lock", 
+        "type": "INTEGER"
+      }, 
+      {
+        "mode": "NULLABLE", 
         "name": "core_call_initial_size", 
         "type": "STRING"
       }, 
@@ -1340,6 +1350,16 @@
       {
         "mode": "NULLABLE", 
         "name": "core_server_slowpath_requests_queued", 
+        "type": "INTEGER"
+      }, 
+      {
+        "mode": "NULLABLE", 
+        "name": "core_completion_queue_event_pop", 
+        "type": "INTEGER"
+      }, 
+      {
+        "mode": "NULLABLE", 
+        "name": "core_completion_queue_event_pop_acquired_lock", 
         "type": "INTEGER"
       }, 
       {

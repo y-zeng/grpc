@@ -373,11 +373,14 @@ static bool cq_event_queue_push(grpc_cq_event_queue *q, grpc_cq_completion *c) {
   return gpr_atm_no_barrier_fetch_add(&q->num_queue_items, 1) == 0;
 }
 
-static grpc_cq_completion *cq_event_queue_pop(grpc_cq_event_queue *q) {
+static grpc_cq_completion *cq_event_queue_pop(grpc_exec_ctx *exec_ctx,
+                                              grpc_cq_event_queue *q) {
   grpc_cq_completion *c = NULL;
+  GRPC_STATS_INC_COMPLETETION_QUEUE_EVENT_POP(exec_ctx);
   if (gpr_spinlock_trylock(&q->queue_lock)) {
     c = (grpc_cq_completion *)gpr_mpscq_pop(&q->queue);
     gpr_spinlock_unlock(&q->queue_lock);
+    GRPC_STATS_INC_COMPLETETION_QUEUE_EVENT_POP_ACQUIRED_LOCK(exec_ctx);
   }
 
   if (c) {
@@ -781,7 +784,7 @@ static bool cq_is_next_finished(grpc_exec_ctx *exec_ctx, void *arg) {
      * that
      * is ok and doesn't affect correctness. Might effect the tail latencies a
      * bit) */
-    a->stolen_completion = cq_event_queue_pop(&cqd->queue);
+    a->stolen_completion = cq_event_queue_pop(exec_ctx, &cqd->queue);
     if (a->stolen_completion != NULL) {
       return true;
     }
@@ -861,7 +864,7 @@ static grpc_event cq_next(grpc_completion_queue *cq, gpr_timespec deadline,
       break;
     }
 
-    grpc_cq_completion *c = cq_event_queue_pop(&cqd->queue);
+    grpc_cq_completion *c = cq_event_queue_pop(exec_ctx, &cqd->queue);
 
     if (c != NULL) {
       ret.type = GRPC_OP_COMPLETE;

@@ -111,12 +111,16 @@ const char *grpc_stats_counter_name[GRPC_STATS_COUNTER_COUNT] = {
     "executor_push_retries",
     "server_requested_calls",
     "server_slowpath_requests_queued",
+    "completion_queue_event_pop",
+    "completion_queue_event_pop_acquired_lock",
 };
 const char *grpc_stats_counter_doc[GRPC_STATS_COUNTER_COUNT] = {
     "Number of client side calls created by this process",
     "Number of server side calls created by this process",
-    "Number of completion queues created", "Number of client channels created",
-    "Number of client subchannels created", "Number of server channels created",
+    "Number of completion queues created",
+    "Number of client channels created",
+    "Number of client subchannels created",
+    "Number of server channels created",
     "Number of polling syscalls (epoll_wait, poll, etc) made by this process",
     "Number of sleeping syscalls made by this process",
     "How many polling wakeups were performed by the process (only valid for "
@@ -146,7 +150,8 @@ const char *grpc_stats_counter_doc[GRPC_STATS_COUNTER_COUNT] = {
     "Number of batches containing receive initial metadata",
     "Number of batches containing receive message",
     "Number of batches containing receive trailing metadata",
-    "Number of settings frames sent", "Number of HTTP2 pings sent by process",
+    "Number of settings frames sent",
+    "Number of HTTP2 pings sent by process",
     "Number of HTTP2 writes initiated",
     "Number of HTTP2 writes offloaded to the executor from application threads",
     "Number of HTTP2 writes that finished seeing more data needed to be "
@@ -220,6 +225,8 @@ const char *grpc_stats_counter_doc[GRPC_STATS_COUNTER_COUNT] = {
     "How many calls were requested (not necessarily received) by the server",
     "How many times was the server slow path taken (indicates too few "
     "outstanding requests)",
+    "Number of all the completion queue event pops",
+    "Number of the completion queue event pops that acquired the queue lock",
 };
 const char *grpc_stats_histogram_name[GRPC_STATS_HISTOGRAM_COUNT] = {
     "call_initial_size",
